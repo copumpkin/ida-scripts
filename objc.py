@@ -69,53 +69,90 @@ def make_structures():
 		AddStrucMember(objc_property, 'name', -1, idaapi.FF_DWRD | idaapi.FF_0OFF | idaapi.FF_DATA, -1, 4, -1, 0, REF_OFF32)
 		AddStrucMember(objc_property, 'type', -1, idaapi.FF_DWRD | idaapi.FF_0OFF | idaapi.FF_DATA, -1, 4, -1, 0, REF_OFF32)
 
-def process_list(start_addr, type, processor = None):
-	if start_addr != 0:
-		MakeStructEx(start_addr, -1, 'objc_listheader')
+def process_list(start_addr, processor):
+	if start_addr == 0:
+		return
 		
-		member_size  = Dword(start_addr + GetMemberOffset(objc_listheader, 'member_size'))
-		member_count = Dword(start_addr + GetMemberOffset(objc_listheader, 'member_count'))
-		
-		for i in range(member_count):
-			MakeStructEx(start_addr + 8 + i * member_size, -1, type)
-			if processor:
-				processor(start_addr + 8 + i * member_size)
+	MakeStructEx(start_addr, -1, 'objc_listheader')
+	
+	member_size  = Dword(start_addr + GetMemberOffset(objc_listheader, 'member_size'))
+	member_count = Dword(start_addr + GetMemberOffset(objc_listheader, 'member_count'))
+	
+	return list(processor(start_addr + 8 + i * member_size) for i in range(member_count))
 
+
+def make_method(class_name, is_meta, addr):
+	MakeStructEx(addr, -1, 'objc_method')
+	name_addr = Dword(addr + GetMemberOffset(objc_method, "name"))
+	code_addr = Dword(addr + GetMemberOffset(objc_method, "code")) & 0xFFFFFFFE # ignore thumb indicator
+
+	# Add comment to show our knowledge about method
+	
+	if is_meta:
+		MakeNameEx(code_addr, class_name + "_meta " + GetString(name_addr, -1, ASCSTR_C), SN_NOCHECK)
+	else:
+		MakeNameEx(code_addr, class_name + " " + GetString(name_addr, -1, ASCSTR_C), SN_NOCHECK)
+
+def make_ivar(class_name, is_meta, addr):
+	MakeStructEx(addr, -1, 'objc_ivar')
+	ivar_name = GetString(Dword(addr + GetMemberOffset(objc_ivar, 'name')), -1, ASCSTR_C)
+	type_desc = GetString(Dword(addr + GetMemberOffset(objc_ivar, 'type')), -1, ASCSTR_C)
+	size = Dword(addr + GetMemberOffset(objc_ivar, 'size'))
+	
+	offset_addr = Dword(addr + GetMemberOffset(objc_ivar, 'offset'))
+	MakeDword(offset_addr)
+	MakeNameEx(offset_addr, 'ivar_' + class_name + '_' + ivar_name, SN_NOCHECK)
+	
+	return (ivar_name, type_desc, size, Dword(offset_addr))
+
+def make_property(class_name, is_meta, addr):
+	MakeStructEx(addr, -1, 'objc_property')
+
+def make_class(addr, is_meta = False):
+	if addr == 0:
+		return
+	
+	MakeStructEx(addr, -1, 'objc_class')
+
+	# recursive calls for meta and superclass
+	make_class(Dword(addr + GetMemberOffset(objc_class, 'metaclass')), True)	
+	make_class(Dword(addr + GetMemberOffset(objc_class, 'superclass')))
+	
+	# the classinfo is where all the stuff we care about resides
+	classinfo_addr = Dword(addr + GetMemberOffset(objc_class, 'classinfo'))
+	MakeStructEx(classinfo_addr, -1, 'objc_classinfo')
+	
+	class_name = GetString(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'name')), -1, ASCSTR_C)
+	
+	process_list(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'methods'   )), lambda x: make_method(class_name, is_meta, x)) # man, I want partial application...
+	ivars = process_list(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'ivars'     )), lambda x: make_ivar(class_name, is_meta, x))
+	process_list(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'properties')), lambda x: make_property(class_name, is_meta, x))
+	
+	print class_name
+	print ivars
+	
+	protocollist_addr = Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'protocols'))
+	if protocollist_addr:
+		member_count = Dword(protocollist_addr)	
+		for i in range(member_count):
+			MakeStructEx(protocollist_addr + 4 + i * GetStrucSize(objc_protocol), -1, 'objc_protocol')
 
 def apply_structures():
 	objc_classlist = SegByName('__objc_classlist') # shouldn't there be a SegByBase around this? doesn't work though
 	objc_classlist_end = SegEnd(objc_classlist)
 	
 	for i in range(objc_classlist, objc_classlist_end, 4):
-		class_addr = Dword(i)
-		MakeStructEx(class_addr, -1, 'objc_class')
-		MakeStructEx(Dword(class_addr + GetMemberOffset(objc_class, 'metaclass')), -1, 'objc_class')
-				
-		classinfo_addr = Dword(class_addr + GetMemberOffset(objc_class, 'classinfo'))
-		MakeStructEx(classinfo_addr, -1, 'objc_classinfo')
-		
-		class_name_addr = Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'name'))
-		class_name = GetString(class_name_addr, -1, ASCSTR_C)
-		
-		def apply_method_name(method_addr):	
-			name_addr = Dword(method_addr + GetMemberOffset(objc_method, "name"))
-			code_addr = Dword(method_addr + GetMemberOffset(objc_method, "code")) & 0xFFFFFFFE # ignore thumb indicator
-
-			MakeNameEx(code_addr, class_name + "__" + GetString(name_addr, -1, ASCSTR_C), SN_NOCHECK)
-		
-		process_list(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'methods'   )), 'objc_method', apply_method_name)
-		process_list(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'ivars'     )), 'objc_ivar'  )
-		process_list(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'properties')), 'objc_ivar'  )
-		
-		protocollist_addr = Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'protocols'))
-		if protocollist_addr != 0:
-			member_count = Dword(protocollist_addr)	
-			for i in range(member_count):
-				MakeStructEx(protocollist_addr + 4 + i * GetStrucSize(objc_protocol), -1, 'objc_protocol')
-		
-		
+		make_class(Dword(i))
 		MakeDword(i)
 
+
+	objc_selrefs = SegByName('__objc_selrefs')
+	objc_selrefs_end = SegEnd(objc_selrefs)
+	
+	for i in range(objc_selrefs, objc_selrefs_end, 4):
+		MakeDword(i)
+		selector = GetString(Dword(i), -1, ASCSTR_C)
+		MakeNameEx(i, "sel_" + selector, SN_NOCHECK)
 
 make_structures()
 apply_structures()
