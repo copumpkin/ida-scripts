@@ -1,5 +1,10 @@
 from idaapi import *
+from idautils import *
 from idc import *
+
+register = re.compile('(..)')
+simple_mem = re.compile('\[(..)\]')
+simple_memoff = re.compile('\[(..),(..)\]')
 
 def make_structures():
 	global objc_class, objc_classinfo, objc_listheader, objc_method, objc_protocol, objc_ivar, objc_category, objc_property
@@ -117,6 +122,7 @@ def make_ivar(class_name, is_meta, addr):
 	return (ivar_name, type_desc, size, Dword(offset_addr))
 
 def make_property(class_name, is_meta, addr):
+	# TODO: parse the type info, etc.
 	MakeStructEx(addr, -1, 'objc_property')
 
 def make_protolist(addr):
@@ -191,6 +197,34 @@ def make_category(addr):
 	process_list(Dword(addr + GetMemberOffset(objc_category, 'methods0')), lambda x: make_method('%s(%s)' % (target_name, category_name), False, x))
 	process_list(Dword(addr + GetMemberOffset(objc_category, 'methods1')), lambda x: make_method('%s(%s)' % (target_name, category_name), False, x))
 
+'''
+def trace_ivar(addr, ivar_name):
+	
+	for xref in XrefsTo(addr):
+		if isCode(xref.frm) and GetMnem(xref.frm) == 'LDR':
+			func_end = GetFunctionAttr(xref.frm, FUNCATTR_END)
+			
+			# Where did our xref end up?
+			regs = {GetOpnd(xref.frm, 0): True}
+			
+			pos = NextHead(xref.frm, func_end)
+			while pos < func_end:								
+				if GetMnem(pos) in ['LDR', 'MOV']:
+					dest_reg = GetOpnd(pos, 0)
+					info = simple_mem.match(GetOpnd(pos, 1))
+					if info:
+						regs[dest_reg] = [regs.get(info.group(1))]
+					elif register.match(GetOpnd(pos, 1)):
+						regs[dest_reg] = regs.get(GetOpnd(pos, 1))
+					else:
+						regs[dest_reg] = None # We're lost (TODO: make this more sophisticated)
+					
+				print regs					
+				
+				pos = NextHead(pos, func_end)
+			
+			break
+'''
 
 def apply_structures():
 	objc_classlist = SegByName('__objc_classlist') # shouldn't there be a SegByBase around this? doesn't work though
@@ -239,3 +273,4 @@ def apply_structures():
 
 make_structures()
 apply_structures()
+#trace_ivar(0xD77A0, '_context')
