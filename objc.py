@@ -69,10 +69,10 @@ def make_structures():
 		objc_category = AddStruc(-1, 'objc_category')
 		AddStrucMember(objc_category, 'name', -1, idaapi.FF_DWRD | idaapi.FF_0OFF | idaapi.FF_DATA, -1, 4, -1, 0, REF_OFF32)
 		AddStrucMember(objc_category, 'target', -1, idaapi.FF_DWRD | idaapi.FF_0OFF | idaapi.FF_DATA, -1, 4, -1, 0, REF_OFF32)
-		AddStrucMember(objc_category, 'methods', -1, idaapi.FF_DWRD | idaapi.FF_0OFF | idaapi.FF_DATA, -1, 4, -1, 0, REF_OFF32)
-		AddStrucMember(objc_category, 'unk1', -1, idaapi.FF_DWRD | idaapi.FF_DATA, -1, 4)
+		AddStrucMember(objc_category, 'methods0', -1, idaapi.FF_DWRD | idaapi.FF_0OFF | idaapi.FF_DATA, -1, 4, -1, 0, REF_OFF32)
+		AddStrucMember(objc_category, 'methods1', -1, idaapi.FF_DWRD | idaapi.FF_0OFF | idaapi.FF_DATA, -1, 4, -1, 0, REF_OFF32)
 		AddStrucMember(objc_category, 'unk2', -1, idaapi.FF_DWRD | idaapi.FF_DATA, -1, 4)	
-		AddStrucMember(objc_category, 'unk2', -1, idaapi.FF_DWRD | idaapi.FF_DATA, -1, 4)	
+		AddStrucMember(objc_category, 'unk3', -1, idaapi.FF_DWRD | idaapi.FF_DATA, -1, 4)	
 		
 	if objc_property == 4294967295:	
 		objc_property = AddStruc(-1, 'objc_property')
@@ -162,12 +162,18 @@ def make_class(addr, is_meta = False):
 	
 	class_name = GetString(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'name')), -1, ASCSTR_C)
 	
+	#if class_name:
+	#	if is_meta:
+	#		MakeNameEx(addr, 'meta_' + class_name, SN_NOCHECK)
+	#	else:
+	#		MakeNameEx(addr, 'class_' + class_name, SN_NOCHECK)
+	
 	process_list(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'methods'   )), lambda x: make_method(class_name, is_meta, x)) # man, I want partial application...
 	ivars = process_list(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'ivars'     )), lambda x: make_ivar(class_name, is_meta, x))
 	process_list(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'properties')), lambda x: make_property(class_name, is_meta, x))
 		
 	make_protolist(Dword(classinfo_addr + GetMemberOffset(objc_classinfo, 'protocols')))
-
+	
 
 def make_category(addr):
 	if addr == 0:
@@ -182,7 +188,9 @@ def make_category(addr):
 		target_classinfo_addr = Dword(target_addr + GetMemberOffset(objc_class, 'classinfo'))
 		target_name = GetString(Dword(target_classinfo_addr + GetMemberOffset(objc_classinfo, 'name')), -1, ASCSTR_C)
 		
-	process_list(Dword(addr + GetMemberOffset(objc_category, 'methods')), lambda x: make_method('%s(%s)' % (target_name, category_name), False, x))
+	process_list(Dword(addr + GetMemberOffset(objc_category, 'methods0')), lambda x: make_method('%s(%s)' % (target_name, category_name), False, x))
+	process_list(Dword(addr + GetMemberOffset(objc_category, 'methods1')), lambda x: make_method('%s(%s)' % (target_name, category_name), False, x))
+
 
 def apply_structures():
 	objc_classlist = SegByName('__objc_classlist') # shouldn't there be a SegByBase around this? doesn't work though
@@ -196,7 +204,7 @@ def apply_structures():
 	objc_classrefs_end = SegEnd(objc_classrefs)
 	
 	for i in range(objc_classrefs, objc_classrefs_end, 4):
-		make_class(Dword(i))
+		make_class(Dword(i))			
 		MakeDword(i)
 
 	objc_selrefs = SegByName('__objc_selrefs')
@@ -221,6 +229,13 @@ def apply_structures():
 	for i in range(objc_protolist, objc_protolist_end, 4):
 		make_protocol(Dword(i))
 		MakeDword(i)
+		
+	objc_superrefs = SegByName('__objc_superrefs')
+	objc_superrefs_end = SegEnd(objc_superrefs)
+
+	for i in range(objc_superrefs, objc_superrefs_end, 4):
+		MakeDword(i)
+	
 
 make_structures()
 apply_structures()
