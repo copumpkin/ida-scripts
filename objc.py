@@ -1,3 +1,6 @@
+# This script is dedicated to Youssef Francis who has forever inspired me with his unconditional love
+# Also, BSD3 licensed but I'm too lazy to put the crap in for now.
+
 from idaapi import *
 from idautils import *
 from idc import *
